@@ -1,4 +1,37 @@
+# Environment / secrets
 .env
+.env_backup
+.env.*
+!.env.example
+
+# Python
 venv/
+.venv/
 __pycache__/
-data/
+*.py[cod]
+*$py.class
+
+# Logs
+*.log
+
+# Local backups
+*_backup.py
+*_backup
+*backup*
+
+# Local runtime/session files
+verification_sessions.json
+pending_requests.json
+
+# SQLite/local database files
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE/editor
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
