@@ -82,9 +82,14 @@ logger = logging.getLogger(__name__)
 
 verification_sessions = {}
 
-# Users explicitly approved through OUR bot's APPROVE button.
+# Users explicitly approved through OUR bot.
 # Key = (group_id, user_id)
 approved_users = set()
+
+# Verification join-request links created by this bot.
+# Key = group_id
+# Value = invite link
+verification_links = {}
 
 
 # ============================================================
@@ -113,19 +118,36 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update.effective_chat
         and update.effective_chat.type == ChatType.PRIVATE
     ):
+
+        session = verification_sessions.get(
+            update.effective_user.id
+        )
+
+        if session:
+            await update.message.reply_text(
+                "🔐 Your group verification session is active.\n\n"
+                "Please continue with the verification steps "
+                "sent by the bot.\n\n"
+                "You must complete verification before your "
+                "join request can be approved."
+            )
+            return
+
         await update.message.reply_text(
             "Hello! 👋\n\n"
             "I am the group's verification and AI assistant bot.\n\n"
-            "If you are trying to join a protected group, use the group's "
-            "verification join-request link.\n\n"
-            "Once you submit a join request, I will contact you privately "
-            "and collect your verification details.\n\n"
-            "You must complete verification before your request can be "
-            "approved.\n\n"
-            "You can also send me any normal message and I will respond using AI."
+            "If you are trying to join a protected group, use the "
+            "group's verification join-request link.\n\n"
+            "Once you submit a join request, I will contact you "
+            "privately and collect your verification details.\n\n"
+            "You must complete verification before your request "
+            "can be approved.\n\n"
+            "You can also send me any normal message and I will "
+            "respond using AI."
         )
 
     else:
+
         await update.message.reply_text(
             "This bot handles private verification and AI assistance."
         )
@@ -135,7 +157,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # /HELP
 # ============================================================
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def help_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
 
     if not update.message:
         return
@@ -144,7 +169,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🤖 Bot Help\n\n"
         "/start - Start the bot\n"
         "/help - Show help\n"
-        "/joinlink <group_id> - Create a verification join-request link\n\n"
+        "/joinlink <group_id> - Create a mandatory "
+        "verification join-request link\n\n"
         "Protected groups require:\n"
         "1. Join request\n"
         "2. Verification\n"
@@ -158,66 +184,77 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # /JOINLINK
 # ============================================================
 
-async def joinlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def joinlink(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
 
     if not update.effective_user or not update.message:
         return
 
     if update.effective_user.id != ADMIN_CHAT_ID:
+
         await update.message.reply_text(
             "❌ You are not authorized to create verification links."
         )
+
         return
 
     if not context.args:
+
         await update.message.reply_text(
             "Usage:\n\n"
             "/joinlink -1001234567890\n\n"
             "Replace the example with your real group ID."
         )
+
         return
 
     try:
+
         group_id = int(context.args[0])
+
     except ValueError:
+
         await update.message.reply_text(
             "❌ Invalid group ID.\n\n"
             "Example:\n"
             "/joinlink -1001234567890"
         )
+
         return
 
     try:
 
-        # --------------------------------------------------------
+        # ====================================================
         # GET GROUP
-        # --------------------------------------------------------
+        # ====================================================
 
-        chat = await context.bot.get_chat(group_id)
+        chat = await context.bot.get_chat(
+            group_id
+        )
 
         logger.info("========================================")
         logger.info("JOIN LINK DIAGNOSTIC")
         logger.info("Group ID: %s", group_id)
         logger.info("Group Title: %s", chat.title)
         logger.info("Group Type: %s", chat.type)
-        logger.info(
-            "Group join_by_request: %s",
-            getattr(chat, "join_by_request", "FIELD NOT AVAILABLE"),
-        )
         logger.info("========================================")
 
         if chat.type not in (
             ChatType.GROUP,
             ChatType.SUPERGROUP,
         ):
+
             await update.message.reply_text(
                 "❌ The supplied chat is not a group or supergroup."
             )
+
             return
 
-        # --------------------------------------------------------
+        # ====================================================
         # CHECK BOT ADMIN
-        # --------------------------------------------------------
+        # ====================================================
 
         bot_member = await context.bot.get_chat_member(
             chat_id=group_id,
@@ -234,14 +271,16 @@ async def joinlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "administrator",
             "creator",
         ):
+
             await update.message.reply_text(
                 "❌ The bot is not an administrator in this group."
             )
+
             return
 
-        # --------------------------------------------------------
+        # ====================================================
         # CHECK INVITE PERMISSION
-        # --------------------------------------------------------
+        # ====================================================
 
         can_invite = getattr(
             bot_member,
@@ -259,20 +298,23 @@ async def joinlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
             bot_member.status == "administrator"
             and can_invite is False
         ):
+
             await update.message.reply_text(
                 "❌ The bot does not have permission to invite/add users.\n\n"
-                "Open Group Settings → Administrators → Bot and enable "
-                "the permission to invite/add subscribers."
+                "Open:\n"
+                "Group Settings → Administrators → Bot\n\n"
+                "Enable the permission to invite/add subscribers."
             )
+
             return
 
-        # --------------------------------------------------------
-        # CREATE JOIN REQUEST LINK
-        # --------------------------------------------------------
+        # ====================================================
+        # CREATE MANDATORY JOIN-REQUEST LINK
+        # ====================================================
 
         invite_link = await context.bot.create_chat_invite_link(
             chat_id=group_id,
-            name="Verification Join Link",
+            name="MANDATORY VERIFICATION",
             creates_join_request=True,
         )
 
@@ -283,33 +325,57 @@ async def joinlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
             invite_link.invite_link,
         )
         logger.info(
-            "creates_join_request returned by Telegram: %s",
+            "creates_join_request: %s",
             invite_link.creates_join_request,
         )
         logger.info("========================================")
 
+        # ====================================================
+        # HARD CHECK
+        # ====================================================
+
         if not invite_link.creates_join_request:
 
             await update.message.reply_text(
-                "❌ TELEGRAM DID NOT CREATE THIS AS A JOIN-REQUEST LINK.\n\n"
-                "The Telegram API returned:\n"
-                "creates_join_request = False\n\n"
-                "The link was NOT presented as a verification link."
+                "❌ SECURITY ERROR\n\n"
+                "Telegram did not create this as a join-request link.\n\n"
+                "The link has NOT been saved or presented as a "
+                "verification link.\n\n"
+                "Do not distribute this link."
             )
 
             return
 
-        # --------------------------------------------------------
+        # ====================================================
+        # SAVE VERIFIED LINK
+        # ====================================================
+
+        verification_links[group_id] = (
+            invite_link.invite_link
+        )
+
+        logger.info(
+            "MANDATORY VERIFICATION LINK SAVED | "
+            "group=%s | link=%s",
+            group_id,
+            invite_link.invite_link,
+        )
+
+        # ====================================================
         # SEND LINK
-        # --------------------------------------------------------
+        # ====================================================
 
         await update.message.reply_text(
-            "✅ VERIFICATION JOIN-REQUEST LINK CREATED\n\n"
+
+            "✅ MANDATORY VERIFICATION LINK CREATED\n\n"
+
             f"Group: {chat.title}\n"
             f"Group ID: {group_id}\n\n"
 
-            "🔐 MANDATORY VERIFICATION FLOW:\n\n"
-            "1️⃣ User opens this link\n"
+            "🔐 VERIFICATION FLOW\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+
+            "1️⃣ User opens THIS link\n"
             "2️⃣ Telegram creates a JOIN REQUEST\n"
             "3️⃣ User remains OUTSIDE the group\n"
             "4️⃣ Bot starts private verification\n"
@@ -317,20 +383,20 @@ async def joinlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "6️⃣ User submits selfie\n"
             "7️⃣ Bot sends verification to admin\n"
             "8️⃣ Request remains PENDING\n"
-            "9️⃣ Admin presses APPROVE or REJECT\n"
-            "🔟 ONLY BOT APPROVAL admits the user\n\n"
+            "9️⃣ Admin presses APPROVE\n"
+            "🔟 Bot approves Telegram request\n"
+            "1️⃣1️⃣ User can then enter the group\n\n"
 
-            "🚫 Verification is mandatory.\n"
-            "🚫 The bot will NOT approve incomplete verification.\n"
-            "🚫 Do not distribute ordinary Telegram invite links.\n\n"
+            "🚫 VERIFICATION IS MANDATORY.\n"
+            "🚫 USER CANNOT BE APPROVED BEFORE VERIFICATION.\n"
+            "🚫 BOT DOES NOT AUTO-APPROVE JOIN REQUESTS.\n"
+            "🚫 DO NOT DISTRIBUTE ORDINARY INVITE LINKS.\n\n"
+
+            "⚠️ IMPORTANT:\n"
+            "Users who enter through an ordinary invite link "
+            "will be removed by the bot's security guard.\n\n"
 
             f"🔗 {invite_link.invite_link}"
-        )
-
-        logger.info(
-            "VERIFICATION LINK READY | group=%s | creates_join_request=%s",
-            group_id,
-            invite_link.creates_join_request,
         )
 
     except Exception:
@@ -366,20 +432,25 @@ async def join_request(
     group_id = group.id
 
     logger.info("================================================")
-    logger.info("JOIN REQUEST RECEIVED")
+    logger.info("MANDATORY JOIN REQUEST RECEIVED")
     logger.info("User ID: %s", user_id)
     logger.info("Username: @%s", user.username or "none")
     logger.info("Group ID: %s", group_id)
     logger.info("Group: %s", group.title)
+    logger.info("Invite Link: %s",
+                getattr(request.invite_link, "invite_link", None))
+    logger.info("Creates Join Request: %s",
+                getattr(request.invite_link, "creates_join_request", None))
     logger.info("================================================")
 
-    # --------------------------------------------------------
-    # IMPORTANT:
+    # ========================================================
+    # CRITICAL SECURITY RULE
+    #
     # NEVER APPROVE HERE.
     #
-    # The request remains pending until the admin presses
-    # the APPROVE button after verification.
-    # --------------------------------------------------------
+    # Telegram keeps the user outside the group while this
+    # join request is pending.
+    # ========================================================
 
     verification_sessions[user_id] = {
 
@@ -412,6 +483,16 @@ async def join_request(
         "verification_complete": False,
 
         "approved_by_bot": False,
+
+        "join_request_received": True,
+
+        "join_request_link": (
+            getattr(
+                request.invite_link,
+                "invite_link",
+                None,
+            )
+        ),
     }
 
     try:
@@ -421,19 +502,20 @@ async def join_request(
             chat_id=request.user_chat_id,
 
             text=(
-                "🔐 GROUP VERIFICATION REQUIRED\n\n"
 
-                f"You requested to join: "
+                "🔐 MANDATORY GROUP VERIFICATION\n\n"
+
+                f"You requested to join:\n"
                 f"{group.title or 'the group'}\n\n"
 
-                "⏳ Your join request is PENDING.\n\n"
+                "⏳ JOIN REQUEST STATUS: PENDING\n\n"
 
                 "🚫 You are NOT inside the group.\n\n"
 
-                "Verification is mandatory before your request "
-                "can be approved.\n\n"
+                "You must complete verification before "
+                "your request can be approved.\n\n"
 
-                "You must provide:\n"
+                "Required information:\n"
                 "• Full name\n"
                 "• Age\n"
                 "• Gender\n"
@@ -441,12 +523,16 @@ async def join_request(
                 "• Purpose\n"
                 "• Selfie\n\n"
 
+                "🔒 Your request will remain pending until "
+                "verification is completed and the administrator "
+                "approves it.\n\n"
+
                 "👤 Please enter your FULL NAME:"
             ),
         )
 
         logger.info(
-            "VERIFICATION STARTED | user=%s | group=%s",
+            "MANDATORY VERIFICATION STARTED | user=%s | group=%s",
             user_id,
             group_id,
         )
@@ -469,19 +555,21 @@ async def direct_join_guard(
 ):
 
     """
-    Safety fallback.
+    Security fallback.
 
-    The actual security gate is the pending join request.
+    The PRIMARY security gate is the Telegram JOIN REQUEST.
 
-    If somebody enters using an ordinary invite link, this handler
-    removes the user and sends them the verification link.
+    If a user enters using an ordinary invite link, Telegram
+    can technically admit them before the bot receives the
+    membership update. This handler immediately removes that
+    unauthorized member.
 
-    If another Telegram admin manually approves a pending join request
-    before our bot approves it, this handler also detects that situation
-    and removes the user again.
+    If another administrator manually approves a join request
+    before our verification is complete, this handler also
+    removes the user.
 
-    A normal bot cannot disable another administrator's Telegram
-    approval button, so this is the enforcement fallback.
+    The bot cannot disable Telegram's native administrator
+    approval controls, so this is the enforcement fallback.
     """
 
     member_update = update.chat_member
@@ -522,7 +610,10 @@ async def direct_join_guard(
     if new_status not in joined_statuses:
         return
 
-    # Never touch admins/owner.
+    # ========================================================
+    # NEVER REMOVE GROUP ADMINS / OWNER
+    # ========================================================
+
     if new_status in {
         "administrator",
         "creator",
@@ -576,113 +667,59 @@ async def direct_join_guard(
         return
 
     # ========================================================
-    # UNAUTHORIZED JOIN-REQUEST APPROVAL
+    # CHECK WHETHER THIS USER HAD A VALID BOT APPROVAL
     # ========================================================
 
-    if getattr(
-        member_update,
-        "via_join_request",
-        False,
+    session = verification_sessions.get(
+        user_id
+    )
+
+    if (
+        session
+        and session.get("group_id") == chat_id
+        and session.get("approved_by_bot") is True
+        and session.get("verification_complete") is True
+        and session.get("status") == "approved"
     ):
 
-        session = verification_sessions.get(
-            user_id
-        )
-
-        if (
-            session
-            and session.get("group_id") == chat_id
-            and session.get("approved_by_bot") is True
-        ):
-            return
-
-        logger.warning(
-            "UNAUTHORIZED JOIN-REQUEST APPROVAL DETECTED | "
-            "user=%s | group=%s",
+        logger.info(
+            "VALIDATED USER JOINED | user=%s | group=%s",
             user_id,
             chat_id,
         )
 
-        # ----------------------------------------------------
-        # REMOVE USER AGAIN
-        # ----------------------------------------------------
-
-        try:
-
-            await context.bot.ban_chat_member(
-                chat_id=chat_id,
-                user_id=user_id,
-            )
-
-            await context.bot.unban_chat_member(
-                chat_id=chat_id,
-                user_id=user_id,
-                only_if_banned=True,
-            )
-
-            logger.info(
-                "UNAUTHORIZED JOIN REMOVED | user=%s | group=%s",
-                user_id,
-                chat_id,
-            )
-
-        except Exception:
-
-            logger.exception(
-                "Could not remove unauthorized approved user | "
-                "user=%s | group=%s",
-                user_id,
-                chat_id,
-            )
-
-        # ----------------------------------------------------
-        # TELL USER
-        # ----------------------------------------------------
-
-        try:
-
-            await context.bot.send_message(
-
-                chat_id=user_id,
-
-                text=(
-                    "🚫 VERIFICATION REQUIRED\n\n"
-
-                    "Your group request was approved before "
-                    "completing the required verification.\n\n"
-
-                    "You have been removed from the group.\n\n"
-
-                    "Please submit the required verification first.\n\n"
-
-                    "The administrator must approve your "
-                    "verification through the verification system."
-                ),
-            )
-
-        except Exception:
-
-            logger.info(
-                "Could not notify unauthorized user %s",
-                user_id,
-            )
-
         return
 
     # ========================================================
-    # DIRECT ORDINARY INVITE JOIN
+    # ANY OTHER JOIN IS UNAUTHORIZED
+    #
+    # This covers:
+    # - ordinary invite links
+    # - old invite links
+    # - manually approved users
+    # - unauthorized membership
     # ========================================================
 
     logger.warning(
-        "DIRECT JOIN DETECTED | user=%s | group=%s | invite=%s",
+        "UNAUTHORIZED GROUP ENTRY DETECTED | "
+        "user=%s | group=%s | via_join_request=%s | invite=%s",
         user_id,
         chat_id,
+        getattr(
+            member_update,
+            "via_join_request",
+            False,
+        ),
         getattr(
             member_update.invite_link,
             "invite_link",
             None,
         ),
     )
+
+    # ========================================================
+    # REMOVE USER
+    # ========================================================
 
     try:
 
@@ -695,106 +732,28 @@ async def direct_join_guard(
             "administrator",
             "creator",
         ):
+
             logger.error(
-                "Cannot protect direct join: bot is not admin | group=%s",
+                "BOT IS NOT ADMIN - cannot enforce verification | "
+                "group=%s",
                 chat_id,
             )
+
             return
 
-        # ----------------------------------------------------
-        # CREATE VERIFICATION LINK
-        # ----------------------------------------------------
-
-        verification_link = (
-            await context.bot.create_chat_invite_link(
-                chat_id=chat_id,
-                name="Verification Join Link",
-                creates_join_request=True,
-            )
+        await context.bot.ban_chat_member(
+            chat_id=chat_id,
+            user_id=user_id,
         )
 
-        if not verification_link.creates_join_request:
-
-            logger.error(
-                "Telegram returned a non-verification invite link "
-                "for group %s",
-                chat_id,
-            )
-
-            return
-
-        # ----------------------------------------------------
-        # REMOVE USER
-        # ----------------------------------------------------
-
-        try:
-
-            await context.bot.ban_chat_member(
-                chat_id=chat_id,
-                user_id=user_id,
-            )
-
-            await context.bot.unban_chat_member(
-                chat_id=chat_id,
-                user_id=user_id,
-                only_if_banned=True,
-            )
-
-            logger.info(
-                "DIRECT JOIN USER REMOVED | user=%s | group=%s",
-                user_id,
-                chat_id,
-            )
-
-        except Exception:
-
-            logger.exception(
-                "Could not remove direct-join user | user=%s | group=%s",
-                user_id,
-                chat_id,
-            )
-
-            return
-
-        # ----------------------------------------------------
-        # PRIVATE VERIFICATION LINK
-        # ----------------------------------------------------
-
-        try:
-
-            await context.bot.send_message(
-
-                chat_id=user_id,
-
-                text=(
-
-                    "🔐 GROUP VERIFICATION REQUIRED\n\n"
-
-                    f"You entered {chat.title or 'the group'} "
-                    "using an invite link that does not use the "
-                    "verification process.\n\n"
-
-                    "Your entry has been removed.\n\n"
-
-                    "Please use the verification link below:\n\n"
-
-                    f"{verification_link.invite_link}\n\n"
-
-                    "You must complete verification and receive "
-                    "administrator approval before entering the group."
-                ),
-            )
-
-        except Exception:
-
-            logger.info(
-                "Private message unavailable for direct-join user %s",
-                user_id,
-            )
+        await context.bot.unban_chat_member(
+            chat_id=chat_id,
+            user_id=user_id,
+            only_if_banned=True,
+        )
 
         logger.info(
-            "DIRECT JOIN REMOVED AND VERIFICATION LINK SENT | "
-            "user=%s | group=%s",
+            "UNAUTHORIZED USER REMOVED | user=%s | group=%s",
             user_id,
             chat_id,
         )
@@ -802,9 +761,110 @@ async def direct_join_guard(
     except Exception:
 
         logger.exception(
-            "DIRECT JOIN GUARD ERROR | user=%s | group=%s",
+            "Could not remove unauthorized user | "
+            "user=%s | group=%s",
             user_id,
             chat_id,
+        )
+
+        return
+
+    # ========================================================
+    # GET / CREATE VERIFICATION LINK
+    # ========================================================
+
+    verification_link = verification_links.get(
+        chat_id
+    )
+
+    if not verification_link:
+
+        try:
+
+            new_link = await context.bot.create_chat_invite_link(
+                chat_id=chat_id,
+                name="MANDATORY VERIFICATION",
+                creates_join_request=True,
+            )
+
+            if new_link.creates_join_request:
+
+                verification_link = new_link.invite_link
+
+                verification_links[chat_id] = (
+                    verification_link
+                )
+
+                logger.info(
+                    "NEW VERIFICATION LINK CREATED | group=%s",
+                    chat_id,
+                )
+
+        except Exception:
+
+            logger.exception(
+                "Could not create verification link | group=%s",
+                chat_id,
+            )
+
+    # ========================================================
+    # TELL USER
+    # ========================================================
+
+    try:
+
+        if verification_link:
+
+            await context.bot.send_message(
+
+                chat_id=user_id,
+
+                text=(
+
+                    "🚫 MANDATORY VERIFICATION REQUIRED\n\n"
+
+                    f"You attempted to enter "
+                    f"{chat.title or 'the group'} "
+                    "without completing the verification process.\n\n"
+
+                    "Your entry has been removed.\n\n"
+
+                    "You must use the verification link below:\n\n"
+
+                    f"🔗 {verification_link}\n\n"
+
+                    "You will remain outside the group until:\n"
+                    "1️⃣ Verification is completed\n"
+                    "2️⃣ Administrator reviews it\n"
+                    "3️⃣ The bot approves your join request"
+                ),
+            )
+
+        else:
+
+            await context.bot.send_message(
+
+                chat_id=user_id,
+
+                text=(
+
+                    "🚫 MANDATORY VERIFICATION REQUIRED\n\n"
+
+                    "You entered the group without completing "
+                    "the verification process.\n\n"
+
+                    "You have been removed.\n\n"
+
+                    "Please contact the administrator for the "
+                    "official verification join-request link."
+                ),
+            )
+
+    except Exception:
+
+        logger.info(
+            "Could not notify unauthorized user %s",
+            user_id,
         )
 
 
@@ -916,19 +976,25 @@ async def private_text(
                 [
                     InlineKeyboardButton(
                         "Male",
-                        callback_data=f"verify_gender|{user_id}|Male",
+                        callback_data=(
+                            f"verify_gender|{user_id}|Male"
+                        ),
                     ),
 
                     InlineKeyboardButton(
                         "Female",
-                        callback_data=f"verify_gender|{user_id}|Female",
+                        callback_data=(
+                            f"verify_gender|{user_id}|Female"
+                        ),
                     ),
                 ],
 
                 [
                     InlineKeyboardButton(
                         "Other",
-                        callback_data=f"verify_gender|{user_id}|Other",
+                        callback_data=(
+                            f"verify_gender|{user_id}|Other"
+                        ),
                     )
                 ],
             ]
@@ -1025,6 +1091,7 @@ async def private_text(
             await update.message.reply_text(
                 "⏳ Your verification has already been submitted.\n\n"
                 "Your join request is still pending.\n\n"
+                "🚫 You are not inside the group yet.\n\n"
                 "Please wait for the administrator's decision."
             )
 
@@ -1124,9 +1191,9 @@ async def private_photo(
 
         session["photo_file_id"] = file_id
 
-        # ----------------------------------------------------
-        # VERIFICATION IS NOW COMPLETE
-        # ----------------------------------------------------
+        # ====================================================
+        # VERIFICATION COMPLETE
+        # ====================================================
 
         session["verification_complete"] = True
         session["state"] = STATE_WAITING_ADMIN
@@ -1138,9 +1205,9 @@ async def private_photo(
             else "No username"
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # ADMIN MESSAGE
-        # ----------------------------------------------------
+        # ====================================================
 
         admin_caption = (
 
@@ -1220,9 +1287,9 @@ async def private_photo(
             admin_message.message_id
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # USER CONFIRMATION
-        # ----------------------------------------------------
+        # ====================================================
 
         await update.message.reply_text(
 
@@ -1288,9 +1355,6 @@ async def verification_callback(
 
     # ========================================================
     # GENDER BUTTON
-    #
-    # IMPORTANT:
-    # This is a USER action, so it must NOT require ADMIN ID.
     # ========================================================
 
     if data.startswith(
@@ -1300,19 +1364,25 @@ async def verification_callback(
         parts = data.split("|")
 
         if len(parts) != 3:
+
             await query.answer(
                 "Invalid verification action.",
                 show_alert=True,
             )
+
             return
 
         try:
+
             user_id = int(parts[1])
+
         except ValueError:
+
             await query.answer(
                 "Invalid user ID.",
                 show_alert=True,
             )
+
             return
 
         # Only the actual user can select their gender.
@@ -1368,7 +1438,7 @@ async def verification_callback(
         return
 
     # ========================================================
-    # EVERYTHING BELOW THIS POINT IS ADMIN ONLY
+    # ADMIN ONLY AFTER THIS POINT
     # ========================================================
 
     if query.from_user.id != ADMIN_CHAT_ID:
@@ -1435,9 +1505,9 @@ async def verification_callback(
 
             return
 
-        # ----------------------------------------------------
+        # ====================================================
         # MANDATORY VERIFICATION CHECK
-        # ----------------------------------------------------
+        # ====================================================
 
         required_fields = [
             "name",
@@ -1449,9 +1519,13 @@ async def verification_callback(
         ]
 
         missing_fields = [
+
             field
+
             for field in required_fields
+
             if not session.get(field)
+
         ]
 
         if missing_fields:
@@ -1472,7 +1546,9 @@ async def verification_callback(
 
             return
 
-        if not session.get("verification_complete"):
+        if not session.get(
+            "verification_complete"
+        ):
 
             await query.answer(
                 "❌ Verification is not complete.",
@@ -1481,7 +1557,9 @@ async def verification_callback(
 
             return
 
-        if session.get("status") != STATE_WAITING_ADMIN:
+        if session.get(
+            "status"
+        ) != STATE_WAITING_ADMIN:
 
             await query.answer(
                 "This request has already been processed.",
@@ -1489,6 +1567,48 @@ async def verification_callback(
             )
 
             return
+
+        # ====================================================
+        # VERIFY REQUEST STILL EXISTS
+        # ====================================================
+
+        try:
+
+            current_member = await context.bot.get_chat_member(
+                chat_id=group_id,
+                user_id=user_id,
+            )
+
+            logger.info(
+                "CURRENT MEMBER STATUS BEFORE APPROVAL | "
+                "user=%s | group=%s | status=%s",
+                user_id,
+                group_id,
+                current_member.status,
+            )
+
+            # If already inside the group, do NOT approve again.
+            if current_member.status in (
+                "member",
+                "administrator",
+                "creator",
+            ):
+
+                await query.answer(
+                    "⚠️ User is already inside the group.",
+                    show_alert=True,
+                )
+
+                return
+
+        except Exception:
+
+            # get_chat_member can fail for pending users.
+            # That is normal, so continue to approval.
+            logger.info(
+                "User is not currently a group member. "
+                "Proceeding with pending join request."
+            )
 
         try:
 
@@ -1498,11 +1618,10 @@ async def verification_callback(
                 group_id,
             )
 
-            # ------------------------------------------------
-            # MARK AS APPROVED BY OUR BOT
-            #
-            # This is done immediately before Telegram approval.
-            # ------------------------------------------------
+            # =================================================
+            # IMPORTANT:
+            # Mark this BEFORE Telegram approval.
+            # =================================================
 
             approved_users.add(
                 (
@@ -1513,9 +1632,9 @@ async def verification_callback(
 
             session["approved_by_bot"] = True
 
-            # ------------------------------------------------
-            # ACTUALLY APPROVE TELEGRAM REQUEST
-            # ------------------------------------------------
+            # =================================================
+            # ACTUALLY APPROVE TELEGRAM JOIN REQUEST
+            # =================================================
 
             await context.bot.approve_chat_join_request(
                 chat_id=group_id,
@@ -1525,14 +1644,15 @@ async def verification_callback(
             session["status"] = "approved"
 
             logger.info(
-                "TELEGRAM JOIN REQUEST APPROVED | user=%s | group=%s",
+                "TELEGRAM JOIN REQUEST APPROVED | "
+                "user=%s | group=%s",
                 user_id,
                 group_id,
             )
 
-            # ------------------------------------------------
+            # =================================================
             # NOTIFY USER
-            # ------------------------------------------------
+            # =================================================
 
             try:
 
@@ -1561,9 +1681,9 @@ async def verification_callback(
                     user_id,
                 )
 
-            # ------------------------------------------------
+            # =================================================
             # UPDATE ADMIN MESSAGE
-            # ------------------------------------------------
+            # =================================================
 
             username = (
 
@@ -1596,7 +1716,10 @@ async def verification_callback(
                     f"User ID: {user_id}\n\n"
 
                     "👥 GROUP\n"
-                    f"{session['group_title']}\n\n"
+                    "━━━━━━━━━━━━━━━━━━\n"
+
+                    f"{session['group_title']}\n"
+                    f"Group ID: {group_id}\n\n"
 
                     "✅ Verification completed.\n"
                     "✅ Admin approved the request.\n"
@@ -1614,7 +1737,10 @@ async def verification_callback(
 
         except Exception:
 
-            # Telegram approval failed.
+            # =================================================
+            # TELEGRAM APPROVAL FAILED
+            # =================================================
+
             approved_users.discard(
                 (
                     group_id,
@@ -1632,7 +1758,8 @@ async def verification_callback(
             )
 
             await query.answer(
-                "❌ Approval failed. The user remains unapproved. "
+                "❌ Approval failed. "
+                "The user remains unapproved. "
                 "Check the terminal.",
                 show_alert=True,
             )
@@ -1694,7 +1821,9 @@ async def verification_callback(
 
             return
 
-        if session.get("status") != STATE_WAITING_ADMIN:
+        if session.get(
+            "status"
+        ) != STATE_WAITING_ADMIN:
 
             await query.answer(
                 "This request has already been processed.",
@@ -1713,9 +1842,9 @@ async def verification_callback(
             session["status"] = "rejected"
             session["approved_by_bot"] = False
 
-            # ------------------------------------------------
+            # =================================================
             # NOTIFY USER
-            # ------------------------------------------------
+            # =================================================
 
             try:
 
@@ -1736,9 +1865,9 @@ async def verification_callback(
                     user_id,
                 )
 
-            # ------------------------------------------------
+            # =================================================
             # UPDATE ADMIN MESSAGE
-            # ------------------------------------------------
+            # =================================================
 
             await query.edit_message_caption(
 
@@ -1880,7 +2009,7 @@ async def post_init(
 def main():
 
     logger.info(
-        "Starting Telegram AI + Verification Bot..."
+        "Starting Telegram AI + Mandatory Verification Bot..."
     )
 
     application = (
@@ -1890,9 +2019,9 @@ def main():
         .build()
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # COMMANDS
-    # --------------------------------------------------------
+    # ========================================================
 
     application.add_handler(
         CommandHandler(
@@ -1915,9 +2044,14 @@ def main():
         )
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # TELEGRAM JOIN REQUEST
-    # --------------------------------------------------------
+    #
+    # THIS IS THE PRIMARY SECURITY GATE.
+    #
+    # IMPORTANT:
+    # We NEVER approve inside this handler.
+    # ========================================================
 
     application.add_handler(
         ChatJoinRequestHandler(
@@ -1925,9 +2059,9 @@ def main():
         )
     )
 
-    # --------------------------------------------------------
-    # MEMBERSHIP SAFETY GUARD
-    # --------------------------------------------------------
+    # ========================================================
+    # MEMBERSHIP SECURITY GUARD
+    # ========================================================
 
     application.add_handler(
         ChatMemberHandler(
@@ -1936,9 +2070,9 @@ def main():
         )
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # CALLBACKS
-    # --------------------------------------------------------
+    # ========================================================
 
     application.add_handler(
         CallbackQueryHandler(
@@ -1946,9 +2080,9 @@ def main():
         )
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # PRIVATE PHOTOS
-    # --------------------------------------------------------
+    # ========================================================
 
     application.add_handler(
         MessageHandler(
@@ -1958,9 +2092,9 @@ def main():
         )
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # PRIVATE TEXT
-    # --------------------------------------------------------
+    # ========================================================
 
     application.add_handler(
 
@@ -1974,9 +2108,9 @@ def main():
         )
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # ERROR HANDLER
-    # --------------------------------------------------------
+    # ========================================================
 
     application.add_error_handler(
         error_handler
@@ -2014,9 +2148,9 @@ def main():
         "========================================"
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # POLLING
-    # --------------------------------------------------------
+    # ========================================================
 
     application.run_polling(
 
